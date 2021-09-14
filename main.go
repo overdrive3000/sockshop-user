@@ -18,9 +18,11 @@ import (
 	"github.com/microservices-demo/user/db"
 	"github.com/microservices-demo/user/db/mongodb"
 	stdopentracing "github.com/opentracing/opentracing-go"
-	zipkin "github.com/openzipkin/zipkin-go-opentracing"
+	zipkinot "github.com/openzipkin-contrib/zipkin-go-opentracing"
+	zipkin "github.com/openzipkin/zipkin-go"
+	"github.com/openzipkin/zipkin-go/idgenerator"
+	zipkinhttp "github.com/openzipkin/zipkin-go/reporter/http"
 	stdprometheus "github.com/prometheus/client_golang/prometheus"
-	commonMiddleware "github.com/weaveworks/common/middleware"
 )
 
 var (
@@ -78,21 +80,24 @@ func main() {
 		} else {
 			logger := log.With(logger, "tracer", "Zipkin")
 			logger.Log("addr", zip)
-			collector, err := zipkin.NewHTTPCollector(
-				zip,
-				zipkin.HTTPLogger(logger),
+			reporter := zipkinhttp.NewReporter(
+				fmt.Sprintf("http://%s/api/v2/spans", zip),
+			)
+			defer reporter.Close()
+			endpoint, err := zipkin.NewEndpoint(ServiceName, fmt.Sprintf("%v:%v", host, port))
+			if err != nil {
+				logger.Log("err", err)
+				os.Exit(1)
+			}
+			nativeTracer, err := zipkin.NewTracer(reporter,
+				zipkin.WithLocalEndpoint(endpoint),
+				zipkin.WithIDGenerator(idgenerator.NewRandomTimestamped()),
 			)
 			if err != nil {
 				logger.Log("err", err)
 				os.Exit(1)
 			}
-			tracer, err = zipkin.NewTracer(
-				zipkin.NewRecorder(collector, false, fmt.Sprintf("%v:%v", host, port), ServiceName),
-			)
-			if err != nil {
-				logger.Log("err", err)
-				os.Exit(1)
-			}
+			tracer = zipkinot.Wrap(nativeTracer)
 		}
 		stdopentracing.InitGlobalTracer(tracer)
 	}
@@ -140,20 +145,20 @@ func main() {
 	// HTTP router
 	router := api.MakeHTTPHandler(endpoints, logger, tracer)
 
-	httpMiddleware := []commonMiddleware.Interface{
-		commonMiddleware.Instrument{
-			Duration:     HTTPLatency,
-			RouteMatcher: router,
-		},
-	}
+	//httpMiddleware := []commonMiddleware.Interface{
+	//	commonMiddleware.Instrument{
+	//		Duration:     HTTPLatency,
+	//		RouteMatcher: router,
+	//	},
+	//}
 
-	// Handler
-	handler := commonMiddleware.Merge(httpMiddleware...).Wrap(router)
+	//// Handler
+	//handler := commonMiddleware.Merge(httpMiddleware...).Wrap(router)
 
 	// Create and launch the HTTP server.
 	go func() {
 		logger.Log("transport", "HTTP", "port", port)
-		errc <- http.ListenAndServe(fmt.Sprintf(":%v", port), handler)
+		errc <- http.ListenAndServe(fmt.Sprintf(":%v", port), router)
 	}()
 
 	// Capture interrupts.
