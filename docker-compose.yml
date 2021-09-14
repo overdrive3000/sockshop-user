@@ -4,7 +4,7 @@ services:
     user:
         build:
             context: .
-        image: weaveworksdemos/user
+        image: overdrive3000/user
         hostname: user
         restart: always
         cap_drop:
@@ -16,11 +16,11 @@ services:
             - MONGO_HOST=user-db:27017
             - reschedule=on-node-failure
         ports:
-            - "8080:80"
+            - "8084:8084"
     user-db:
         build:
             context: ./docker/user-db/
-        image: weaveworksdemos/user-db
+        image: overdrive3000/user-db
         hostname: user-db
         restart: always
         cap_drop:
